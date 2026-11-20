@@ -1,12 +1,13 @@
 /* ============================================================
-   Live price feed — tries real sources, falls back to a
-   realistic regime-switching simulator so the app NEVER
-   shows a blank screen (offline / blocked network safe).
-   Sources tried in order:
-     1. Stooq CSV  (xauusd)          — free, no key
-     2. Yahoo Finance chart API      — free, no key
-     3. gold-api.com                 — free spot price
-     4. Local simulator              — always available
+   Price data layer — REAL realtime history first, simulator
+   only as last-resort offline fallback.
+
+   Order for history (per timeframe):
+     1. Binance PAXGUSDT klines REST (data-api.binance.vision)
+     2. Yahoo Finance GC=F chart REST
+     3. Local simulator (offline / blocked network)
+
+   Live tick streaming is handled by realtime.js (WebSocket).
    ============================================================ */
 (function (global) {
   'use strict';
@@ -20,14 +21,15 @@
     D1:  { label: 'D1',  minutes: 1440, candles: 140 },
   };
 
-  let basePrice = 2650 + Math.random() * 200; // will be overwritten by live fetch
-  let regime = 0; // -1 down, 0 range, 1 up
-  let regimeTimer = 0;
+  let basePrice = 2650 + Math.random() * 200;
+  let regime = 0, regimeTimer = 0;
   let liveSource = 'Simulator';
+  let mode = 'simulator'; // 'realtime' | 'simulator'
+  let ticker24h = null;
+  let realtimeHandle = null;
 
   function seededRandom(seed) { let s = seed; return () => { s = (s * 9301 + 49297) % 233280; return s / 233280; }; }
-
-  const volFor = (minutes) => Math.min(0.0007 * Math.sqrt(minutes), 0.012); // sqrt-time scaling, capped at 1.2%/candle
+  const volFor = (minutes) => Math.min(0.0007 * Math.sqrt(minutes), 0.012);
 
   function genCandles(count, minutes, startPrice) {
     const rand = seededRandom(42 + minutes * 7 + count);
@@ -40,23 +42,16 @@
       const drift = regime * vol * 0.3;
       const shock = (rand() - 0.5) * 2 * vol;
       const open = price;
-      const meanRevert = (startPrice - open) * 0.004; // anchor price near start so 220 candles stay realistic
+      const meanRevert = (startPrice - open) * 0.004;
       const change = open * (drift + shock) + meanRevert;
       const close = open + change;
       const high = Math.max(open, close) + Math.abs(open * (rand() - 0.4) * vol * 0.9);
       const low = Math.min(open, close) - Math.abs(open * (rand() - 0.6) * vol * 0.9);
-      candles.push({
-        time: now - (count - i) * minutes * 60000,
-        open, high, low, close,
-        volume: Math.round(80 + rand() * 900),
-      });
+      candles.push({ time: now - (count - i) * minutes * 60000, open, high, low, close, volume: Math.round(80 + rand() * 900) });
       price = close;
     }
-    // Rebase so every timeframe ends at the same live price (like real market data)
     const factor = startPrice / price;
-    if (isFinite(factor) && factor > 0) {
-      candles.forEach((c) => { c.open *= factor; c.high *= factor; c.low *= factor; c.close *= factor; });
-    }
+    if (isFinite(factor) && factor > 0) candles.forEach((c) => { c.open *= factor; c.high *= factor; c.low *= factor; c.close *= factor; });
     return candles;
   }
 
@@ -79,7 +74,7 @@
     return next;
   }
 
-  async function fetchJSON(url, timeoutMs = 6000) {
+  async function fetchJSON(url, timeoutMs = 8000) {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
@@ -89,7 +84,7 @@
     } finally { clearTimeout(t); }
   }
 
-  async function fetchText(url, timeoutMs = 6000) {
+  async function fetchText(url, timeoutMs = 8000) {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
@@ -100,7 +95,13 @@
   }
 
   async function tryLivePrice() {
-    // 1) Stooq
+    // 1) Binance 24h ticker (fast, CORS-enabled)
+    try {
+      const j = await fetchJSON('https://data-api.binance.vision/api/v3/ticker/24hr?symbol=PAXGUSDT');
+      const p = parseFloat(j.lastPrice);
+      if (p > 1000 && p < 10000) { liveSource = 'Binance PAXG Live'; return p; }
+    } catch (e) {}
+    // 2) Stooq spot quote
     try {
       const txt = await fetchText('https://stooq.com/q/l/?s=xauusd&f=sd2t2ohlcv&h&e=csv');
       const parts = txt.trim().split('\n')[1]?.split(',');
@@ -108,36 +109,86 @@
         const p = parseFloat(parts[6]);
         if (p > 1000 && p < 10000) { liveSource = 'Stooq Live'; return p; }
       }
-    } catch (e) { /* fall through */ }
-    // 2) Yahoo Finance
+    } catch (e) {}
+    // 3) Yahoo Finance
     try {
       const j = await fetchJSON('https://query1.finance.yahoo.com/v8/finance/chart/GC=F?interval=5m&range=1d');
       const price = j?.chart?.result?.[0]?.meta?.regularMarketPrice;
       if (price > 1000 && price < 10000) { liveSource = 'Yahoo Finance Live'; return price; }
-    } catch (e) { /* fall through */ }
-    // 3) gold-api.com
-    try {
-      const j = await fetchJSON('https://api.gold-api.com/price/XAU');
-      if (j?.price > 1000 && j?.price < 10000) { liveSource = 'Gold-API Live'; return j.price; }
-    } catch (e) { /* fall through */ }
+    } catch (e) {}
     liveSource = 'Simulator (offline fallback)';
     return null;
   }
 
+  /**
+   * Init store: fetch REAL history for every timeframe in parallel.
+   * Any TF that fails falls back to simulator candles anchored at the
+   * live price, so the chart is never blank.
+   */
   async function init() {
+    const store = {};
+    const RT = global.PulseRealtime;
+    let realCount = 0;
+
+    // 24h ticker (header stats) — best effort, non-blocking
+    if (RT) {
+      RT.fetchTicker24h().then((t) => { if (t) { ticker24h = t; basePrice = t.last; } }).catch(() => {});
+    }
+
+    if (RT) {
+      const jobs = Object.keys(TIMEFRAMES).map(async (tf) => {
+        const cfg = TIMEFRAMES[tf];
+        const hist = await RT.fetchHistory(tf, 300).catch(() => null);
+        if (hist && hist.candles.length >= 30) {
+          store[tf] = hist.candles;
+          realCount++;
+          return { tf, source: hist.source };
+        }
+        return { tf, source: null };
+      });
+      const results = await Promise.all(jobs);
+      const sources = [...new Set(results.map((r) => r.source).filter(Boolean))];
+      if (realCount > 0) {
+        mode = 'realtime';
+        liveSource = sources.join(' + ') || 'Realtime';
+        // Fill any failed TFs with simulator anchored at the real last price
+        const anchor = store[Object.keys(store)[0]].slice(-1)[0].close;
+        basePrice = anchor;
+        for (const tf of Object.keys(TIMEFRAMES)) {
+          if (!store[tf]) store[tf] = genCandles(TIMEFRAMES[tf].candles, TIMEFRAMES[tf].minutes, anchor);
+        }
+        return store;
+      }
+    }
+
+    // All real sources failed -> simulator mode
     const live = await tryLivePrice();
     if (live) basePrice = live;
-    const store = {};
-    for (const [tf, cfg] of Object.entries(TIMEFRAMES)) {
-      store[tf] = genCandles(cfg.candles, cfg.minutes, basePrice);
-    }
+    mode = 'simulator';
+    for (const [tf, cfg] of Object.entries(TIMEFRAMES)) store[tf] = genCandles(cfg.candles, cfg.minutes, basePrice);
     return store;
   }
 
-  function getSource() { return liveSource; }
-  function getBasePrice() { return basePrice; }
+  /** Start WebSocket streaming into store. Returns handle or null in simulator mode. */
+  function startRealtime(store, callbacks) {
+    const RT = global.PulseRealtime;
+    if (!RT || mode !== 'realtime') return null;
+    if (realtimeHandle) realtimeHandle.stop();
+    realtimeHandle = RT.startRealtime(store, callbacks);
+    return realtimeHandle;
+  }
 
-  const api = { TIMEFRAMES, init, tickCandle, tryLivePrice, getSource, getBasePrice, genCandles };
+  function stopRealtime() { if (realtimeHandle) { realtimeHandle.stop(); realtimeHandle = null; } }
+
+  function getSource() { return liveSource; }
+  function getMode() { return mode; }
+  function setMode(m) { mode = m; }
+  function getBasePrice() { return basePrice; }
+  function getTicker() { return ticker24h; }
+  function setTicker(t) { ticker24h = t; }
+  function setSource(s) { liveSource = s; }
+
+  const api = { TIMEFRAMES, init, tickCandle, tryLivePrice, startRealtime, stopRealtime, getSource, getMode, setMode, getBasePrice, getTicker, setTicker, setSource, genCandles };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   global.PulseData = api;
 })(typeof window !== 'undefined' ? window : globalThis);

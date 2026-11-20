@@ -26,6 +26,17 @@ html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:
 .tick-meta{display:flex;gap:6px;justify-content:center;margin-top:4px;flex-wrap:wrap}
 .pill{background:var(--panel2);border:1px solid var(--border);border-radius:20px;padding:3px 10px;font-size:11px;color:var(--muted)}
 .pill.warn{color:#fbbf24;border-color:#3a2f10}
+.conn-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:middle;background:#8b94a7}
+.conn-dot.live{background:#4ade80;box-shadow:0 0 8px #4ade80;animation:pulseDot 1.6s infinite}
+.conn-dot.polling{background:#fbbf24;box-shadow:0 0 8px #fbbf24}
+.conn-dot.reconnecting{background:#fbbf24;animation:pulseDot .8s infinite}
+.conn-dot.offline{background:#f87171}
+.conn-dot.connecting{background:#8b94a7;animation:pulseDot 1s infinite}
+@keyframes pulseDot{0%,100%{opacity:1}50%{opacity:.35}}
+.ticker-stats{margin-top:5px;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.tick-price.flash-up{color:#4ade80;transition:color .15s}
+.tick-price.flash-down{color:#f87171;transition:color .15s}
+.feed-select{background:var(--panel2);border:1px solid var(--border);color:var(--text);border-radius:9px;padding:8px 10px;font-weight:700;font-size:12px;cursor:pointer}
 .top-actions{display:flex;gap:8px;flex-wrap:wrap}
 
 /* Buttons */

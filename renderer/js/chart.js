@@ -72,16 +72,27 @@
       ctx.fillRect(x - bodyW / 2, top, bodyW, Math.max(1, bot - top));
     });
 
-    // last price dashed line + label
+    // last price dashed line + label (color follows live candle direction)
     const last = view[view.length - 1];
+    const lastUp = last.close >= last.open;
+    const lastColor = lastUp ? '#26a69a' : '#ef5350';
     ctx.strokeStyle = 'rgba(245,197,66,0.7)'; ctx.setLineDash([4, 4]);
     ctx.beginPath(); ctx.moveTo(padL, y(last.close)); ctx.lineTo(padL + plotW, y(last.close)); ctx.stroke();
     ctx.setLineDash([]);
-    ctx.fillStyle = '#f5c542';
+    ctx.fillStyle = lastColor;
     ctx.fillRect(padL + plotW + 2, y(last.close) - 9, 60, 18);
-    ctx.fillStyle = '#0a0c10';
+    ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 11px system-ui, sans-serif';
     ctx.fillText(last.close.toFixed(2), padL + plotW + 6, y(last.close) + 4);
+    // live pulsing dot on the forming candle
+    if (opts.live) {
+      const lx = padL + (view.length - 1) * step + step / 2;
+      const pulse = 3 + Math.sin(Date.now() / 300) * 1.2;
+      ctx.fillStyle = lastColor;
+      ctx.beginPath(); ctx.arc(lx, y(last.close), Math.max(2.5, pulse), 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.9)';
+      ctx.beginPath(); ctx.arc(lx, y(last.close), 1.4, 0, Math.PI * 2); ctx.fill();
+    }
 
     // Entry / SL / TP markers
     if (opts.trade) {

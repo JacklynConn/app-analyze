@@ -4,6 +4,8 @@
 
 Built with Electron (Windows / macOS / Linux) + vanilla JS — ដំណើរការលឿន ស្រាល offline បាន។
 
+**v2.1 — Realtime Price Chart ពិត:** Chart ទាញតម្លៃ Live ពិតពីទីផ្សារ មិនមែន simulator ទៀតទេ (មើលផ្នែក Realtime ខាងក្រោម)។
+
 ---
 
 ## 🚀 របៀបដំណើរការ (Run)
@@ -47,7 +49,7 @@ npm test
 | តម្លៃ | ត្រូវទិញ KEY | **FREE ពេញមួយជីវិត** |
 | Login | ត្រូវ Login | **មិនត្រូវ Login** |
 | ការប្រើប្រាស់ | Web browser | **Desktop App (Win/Mac/Linux) + Web** |
-| Live price | TradingView widget | **Live feed ពិត (Stooq / Yahoo / Gold-API) + fallback simulator** |
+| Live price | TradingView widget | **Realtime ពិត: Binance PAXG WebSocket (tick-by-tick) + Yahoo GC=F + fallback simulator** |
 | Signal Engine | រូបភាព Chart scan (ត្រូវ KEY) | **9-indicator confluence engine រត់ផ្ទាល់លើ candles** |
 | Timeframes | M1–D1 (ដាច់ៗ) | **M1 M5 M15 H1 H4 D1 — Scanner ស្កេនទាំងអស់ព្រមគ្នា + Confluence score** |
 | Indicators | មិនបង្ហាញ | **EMA 9/21/50/200 · RSI · MACD · Bollinger · Stochastic · ATR · VWAP · S/R · Momentum — បង្ហាញ vote គ្រប់មួយ** |
@@ -63,6 +65,18 @@ npm test
 | ភាសា | ខ្មែរ/អង់គ្លេស | **ខ្មែរ + English UI** |
 
 ---
+
+## 📡 Realtime Price Chart (v2.1) — របៀបភ្ជាប់
+
+Chart ឥឡូវភ្ជាប់តម្លៃ **ពិតពីទីផ្សារ** មិនមែន simulator:
+
+1. **History (candles ពិត)** — ទាញ OHLC ពិតសម្រាប់គ្រប់ TF (M1–D1) ពី Binance PAXGUSDT klines REST (`data-api.binance.vision`), fallback Yahoo Finance GC=F (COMEX Gold Futures)
+2. **Streaming (tick-by-tick)** — Binance WebSocket combined stream `paxgusdt@kline_1m/5m/15m/1h/4h/1d` — candle កំពុងបង្កើត update រាល់ tick, candle ថ្មីចាប់ផ្តើមពេល candle មុនបិទ; Scanner + Signal update ពេល candle បិទ
+3. **Auto-reconnect + Polling fallback** — WS ដាច់ → reconnect exponential backoff (2s→30s) + polling REST រាល់ 5s ដើម្បីឱ្យ chart នៅតែ live
+4. **UI status** — ● LIVE (green pulsing) / ◐ POLLING / ◌ RECONNECTING, Last tick time, Candle countdown, Bid/Ask/Spread + 24h High/Low/Change, price flash green/red រាល់ tick, live dot នៅលើ candle កំពុងបង្កើត
+5. **Feed selector** — Auto (Binance WS) / Binance / Yahoo GC=F polling / Simulator (offline) — ប្តូរបានភ្លាមៗ, ប៊ូតុង Reconnect ទាញ history ថ្មី
+
+> **ចំណាំតម្លៃ:** Binance PAXG គឺជា gold-backed token ដែលតាមដាន XAUUSD ជិតបំផុត (~0.1–0.3% premium/discount) — សមស្របសម្រាប់ការវិភាគ Signal។ Yahoo GC=F គឺ COMEX Gold Futures។ ត្រូវការអ៊ីនធឺណិតសម្រាប់ realtime; ពេល offline app នឹងធ្លាក់ទៅ simulator ដោយស្វ័យប្រវត្តិ។
 
 ## 🧠 Signal Engine — របៀបធ្វើការ
 
@@ -89,10 +103,12 @@ electron/preload.js    — secure bridge (contextIsolation)
 renderer/index.html    — UI (ខ្មែរ/English)
 renderer/styles.css    — dark pro-trading theme
 renderer/js/engine.js  — indicators + signal + backtest + lot (pure, tested)
-renderer/js/data.js    — live feed (Stooq/Yahoo/Gold-API) + simulator
-renderer/js/chart.js   — canvas candlestick chart (no libs)
-renderer/js/app.js     — UI controller, scanner, journal, alerts
-tests/engine.test.js   — unit tests (npm test)
+renderer/js/realtime.js — Binance WS + REST / Yahoo parsers + streaming client (pure, tested)
+renderer/js/data.js    — data layer: realtime history first, simulator fallback
+renderer/js/chart.js   — canvas candlestick chart + live dot (no libs)
+renderer/js/app.js     — UI controller, scanner, journal, alerts, realtime wiring
+tests/engine.test.js   — engine unit tests
+tests/realtime.test.js — realtime parser/stream unit tests (npm test: 17 tests)
 ```
 
 ## ⚠️ Disclaimer
