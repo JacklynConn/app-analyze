@@ -4,7 +4,8 @@
 
 Built with Electron (Windows / macOS / Linux) + vanilla JS — ដំណើរការលឿន ស្រាល offline បាន។
 
-**v2.1 — Realtime Price Chart ពិត:** Chart ទាញតម្លៃ Live ពិតពីទីផ្សារ មិនមែន simulator ទៀតទេ (មើលផ្នែក Realtime ខាងក្រោម)។
+**v2.2 — Realtime Price Display แบบ Zoqira Terminal:** Ticker Tape រត់ខាងលើ (XAUUSD/BTC/ETH/EUR/GBP/USOIL/XAG), តម្លៃធំ `3,590.95` + % change, `● LIVE · synced Xs ago` / `delayed · live-sync ~1 min`, Day Range bar — មើលផ្នែក Realtime ខាងក្រោម។
+**v2.1 — Realtime Price Chart ពិត:** Chart ទាញតម្លៃ Live ពិតពីទីផ្សារ មិនមែន simulator ទៀតទេ។
 
 ---
 
@@ -65,6 +66,15 @@ npm test
 | ភាសា | ខ្មែរ/អង់គ្លេស | **ខ្មែរ + English UI** |
 
 ---
+
+## 📡 Realtime Price Display แบบ Zoqira (v2.2)
+
+ដូច [zoqira.pro](https://zoqira.pro/) terminal:
+
+- **Ticker Tape រត់** ខាងលើสุด: `XAUUSD 3,590.95 -2.07% · BTCUSDT 61,809 -3.14% · ETHUSDT 1,751.14 · EURUSD 1.0964 · GBPUSD 1.3112 · USOIL 81.90 · XAGUSD 42.612` — hover ដើម្បី pause, XAUUSD update រាល់ WebSocket tick, symbols ផ្សេងទៀត refresh រាល់ 15s (Binance BTC/ETH + Yahoo EUR/GBP/Oil/Silver)
+- **តម្លៃធំ** `3,590.95` (មាន thousand separator) + badge % change ពណ៌ green/red + price flash រាល់ tick
+- **Sync label** — `● LIVE · synced 0.3s ago` ពេល WebSocket live, `◐ delayed · live-sync ~1 min` ពេល polling (ដូច Zoqira), `○ offline` ពេល simulator
+- **Day Range bar** — Low → High ជាមួយ marker បង្ហាញទីតាំងតម្លៃបច្ចុប្បន្ន + Bid/Ask/Spread
 
 ## 📡 Realtime Price Chart (v2.1) — របៀបភ្ជាប់
 

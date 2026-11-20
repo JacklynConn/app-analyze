@@ -28,6 +28,17 @@
     D1:  { interval: '1d',  range: '2y'  },
   };
 
+  // Zoqira-style ticker tape symbols (order matters — XAUUSD first)
+  const TAPE_SYMBOLS = [
+    { display: 'XAUUSD',  binance: 'PAXGUSDT', yahoo: 'GC=F',     decimals: 2 },
+    { display: 'BTCUSDT', binance: 'BTCUSDT',  yahoo: null,       decimals: 0 },
+    { display: 'ETHUSDT', binance: 'ETHUSDT',  yahoo: null,       decimals: 2 },
+    { display: 'EURUSD',  binance: null,       yahoo: 'EURUSD=X', decimals: 4 },
+    { display: 'GBPUSD',  binance: null,       yahoo: 'GBPUSD=X', decimals: 4 },
+    { display: 'USOIL',   binance: null,       yahoo: 'CL=F',     decimals: 2 },
+    { display: 'XAGUSD',  binance: null,       yahoo: 'SI=F',     decimals: 3 },
+  ];
+
   /* ---------- pure parsers (tested) ---------- */
 
   // Binance REST klines: [[openTime, o, h, l, c, v, closeTime, ...], ...]
@@ -97,6 +108,35 @@
     return { isNew: false, prevClose: last.close }; // stale tick, ignore
   }
 
+  // Yahoo chart meta -> { price, changePct, high, low } (for tape symbols)
+  function parseYahooMeta(json) {
+    const meta = json && json.chart && json.chart.result && json.chart.result[0] && json.chart.result[0].meta;
+    if (!meta || meta.regularMarketPrice == null) return null;
+    return {
+      price: meta.regularMarketPrice,
+      changePct: meta.regularMarketChangePercent != null ? meta.regularMarketChangePercent : 0,
+      high: meta.regularMarketDayHigh != null ? meta.regularMarketDayHigh : meta.regularMarketPrice,
+      low: meta.regularMarketDayLow != null ? meta.regularMarketDayLow : meta.regularMarketPrice,
+    };
+  }
+
+  // Binance 24h ticker JSON -> { price, changePct, high, low, bid, ask }
+  function parseBinanceTicker(j) {
+    if (!j || j.lastPrice == null) return null;
+    return {
+      price: parseFloat(j.lastPrice),
+      changePct: parseFloat(j.priceChangePercent) || 0,
+      high: parseFloat(j.highPrice), low: parseFloat(j.lowPrice),
+      bid: parseFloat(j.bidPrice), ask: parseFloat(j.askPrice),
+    };
+  }
+
+  // Zoqira-style price formatting: 3590.95 -> "3,590.95", 61809 -> "61,809"
+  function formatPrice(price, decimals = 2) {
+    if (price == null || !isFinite(price)) return '—';
+    return Number(price).toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+  }
+
   function combinedStreamUrl(host) {
     const streams = Object.values(TF_TO_BINANCE).map((i) => `${SYMBOL.toLowerCase()}@kline_${i}`).join('/');
     return `${host}/stream?streams=${streams}`;
@@ -145,19 +185,47 @@
     for (const host of REST_HOSTS) {
       try {
         const j = await fetchJSON(`${host}/api/v3/ticker/24hr?symbol=${SYMBOL}`);
-        if (j && j.lastPrice) {
-          return {
-            last: parseFloat(j.lastPrice),
-            changePct: parseFloat(j.priceChangePercent),
-            change: parseFloat(j.priceChange),
-            high: parseFloat(j.highPrice), low: parseFloat(j.lowPrice),
-            bid: parseFloat(j.bidPrice), ask: parseFloat(j.askPrice),
-            open: parseFloat(j.openPrice),
-          };
-        }
+        const t = parseBinanceTicker(j);
+        if (t) return { ...t, last: t.price, change: parseFloat(j.priceChange), open: parseFloat(j.openPrice) };
       } catch (e) { /* next host */ }
     }
     return null;
+  }
+
+  /** Generic Binance 24h ticker for any symbol (BTC/ETH tape items). */
+  async function fetchSymbolTicker(binanceSymbol) {
+    for (const host of REST_HOSTS) {
+      try {
+        const j = await fetchJSON(`${host}/api/v3/ticker/24hr?symbol=${binanceSymbol}`, 6000);
+        const t = parseBinanceTicker(j);
+        if (t) return t;
+      } catch (e) { /* next host */ }
+    }
+    return null;
+  }
+
+  /** Generic Yahoo quote for any symbol (EURUSD/GBPUSD/USOIL/XAG tape items). */
+  async function fetchYahooQuote(yahooSymbol) {
+    try {
+      const j = await fetchJSON(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}?interval=1d&range=1d`, 6000);
+      return parseYahooMeta(j);
+    } catch (e) { return null; }
+  }
+
+  /**
+   * Fetch all tape symbols in parallel (Zoqira-style ticker tape).
+   * Never throws — returns whatever succeeded, in TAPE_SYMBOLS order.
+   */
+  async function fetchTapeTickers() {
+    const jobs = TAPE_SYMBOLS.map(async (s) => {
+      let q = null;
+      if (s.binance) q = await fetchSymbolTicker(s.binance);
+      if (!q && s.yahoo) q = await fetchYahooQuote(s.yahoo);
+      if (!q) return null;
+      return { symbol: s.display, price: q.price, changePct: q.changePct, high: q.high, low: q.low, decimals: s.decimals };
+    });
+    const results = await Promise.all(jobs);
+    return results.filter(Boolean);
   }
 
   /* ---------- WebSocket realtime client ---------- */
@@ -250,10 +318,11 @@
   }
 
   const api = {
-    SYMBOL, TF_TO_BINANCE, BINANCE_TO_TF, TF_TO_YAHOO,
+    SYMBOL, TF_TO_BINANCE, BINANCE_TO_TF, TF_TO_YAHOO, TAPE_SYMBOLS,
     parseBinanceKlines, parseYahooChart, parseBinanceKlineEvent, applyTick,
+    parseYahooMeta, parseBinanceTicker, formatPrice,
     combinedStreamUrl, klinesUrl, yahooUrl,
-    fetchHistory, fetchTicker24h, startRealtime,
+    fetchHistory, fetchTicker24h, fetchSymbolTicker, fetchYahooQuote, fetchTapeTickers, startRealtime,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   global.PulseRealtime = api;

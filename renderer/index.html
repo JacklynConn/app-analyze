@@ -9,20 +9,32 @@
 </head>
 <body>
 <div id="app">
+  <!-- ===== Zoqira-style live ticker tape ===== -->
+  <div class="ticker-tape" title="Realtime prices — hover to pause">
+    <span class="tape-label"><span class="conn-dot live" id="tapeDot"></span>LIVE</span>
+    <div class="tape-viewport"><div id="tickerTape" class="tape-track"><span class="tape-item">Connecting to realtime feed…</span></div></div>
+  </div>
+
   <!-- ===== Top bar ===== -->
   <header class="topbar">
     <div class="brand">
       <div class="logo">Au</div>
       <div>
         <div class="brand-name">XAUUSD <span>PULSE PRO</span></div>
-        <div class="brand-sub">Gold Signal Scanner · Desktop v2.1 Realtime · FREE forever — no KEY, no login</div>
+        <div class="brand-sub">Gold Signal Scanner · Desktop v2.2 Realtime · FREE forever — no KEY, no login</div>
       </div>
     </div>
     <div class="ticker">
       <div class="tick-main">
-        <span class="tick-symbol">XAUUSD</span>
+        <span class="tick-symbol">XAUUSD <small>Gold / USD</small></span>
         <span id="livePrice" class="tick-price">—</span>
         <span id="liveChange" class="tick-change">—</span>
+      </div>
+      <div class="tick-sync"><span id="syncLabel" class="sync-label">◌ connecting…</span></div>
+      <div class="day-range">
+        <span id="dayLow" class="dr-label">L —</span>
+        <div class="range-bar"><div id="rangeMarker" class="range-marker"></div></div>
+        <span id="dayHigh" class="dr-label">H —</span>
       </div>
       <div class="tick-meta">
         <span id="feedSource" class="pill"><span id="connDot" class="conn-dot connecting"></span> Connecting…</span>

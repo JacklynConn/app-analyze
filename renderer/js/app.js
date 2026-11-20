@@ -4,6 +4,8 @@
   const E = window.PulseEngine, D = window.PulseData, C = window.PulseChart;
   const $ = (id) => document.getElementById(id);
   const fmt = (n, d = 2) => (n == null || isNaN(n) ? '—' : Number(n).toFixed(d));
+  // Zoqira-style: 3590.95 -> "3,590.95"
+  const fmtPrice = (n, d = 2) => (window.PulseRealtime && RT.formatPrice) ? RT.formatPrice(n, d) : (n == null || isNaN(n) ? '—' : Number(n).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }));
 
   let store = {}, currentTF = 'M15', mode = 'scalping';
   let lastSignal = null, lastSignalKey = '', soundOn = true, alertArmed = false;
@@ -80,13 +82,71 @@
     const src = D.getMode() === 'realtime' ? D.getSource() : 'Simulator (offline)';
     if ($('feedSource')) $('feedSource').innerHTML = `<span id="connDot" class="conn-dot ${status}"></span> ${labels[status] || status} · ${src}${detail ? ' · ' + detail : ''}`;
     if ($('chartSource')) $('chartSource').textContent = src + (status === 'live' ? ' · WebSocket' : status === 'polling' ? ' · REST poll' : '');
+    updateSyncLabel();
   }
 
   function renderTicker() {
     const t = D.getTicker && D.getTicker();
     if (!t) return;
     $('tickerStats').textContent =
-      `Bid ${fmt(t.bid)} · Ask ${fmt(t.ask)} · Spread ${fmt(t.ask - t.bid)} · 24h H ${fmt(t.high)} / L ${fmt(t.low)} · 24h ${t.changePct >= 0 ? '+' : ''}${fmt(t.changePct)}%`;
+      `Bid ${fmtPrice(t.bid)} · Ask ${fmtPrice(t.ask)} · Spread ${fmtPrice(t.ask - t.bid)} · 24h H ${fmtPrice(t.high)} / L ${fmtPrice(t.low)} · 24h ${t.changePct >= 0 ? '+' : ''}${fmt(t.changePct)}%`;
+    // Day range bar (Zoqira terminal style)
+    if (t.high && t.low && t.high > t.low) {
+      $('dayLow').textContent = 'L ' + fmtPrice(t.low);
+      $('dayHigh').textContent = 'H ' + fmtPrice(t.high);
+      const candles = store[currentTF];
+      const price = candles && candles.length ? candles[candles.length - 1].close : t.last;
+      const pos = Math.min(100, Math.max(0, ((price - t.low) / (t.high - t.low)) * 100));
+      $('rangeMarker').style.left = pos + '%';
+    }
+  }
+
+  /** Zoqira-style sync label: LIVE synced Xs ago / delayed live-sync ~1 min / offline */
+  function updateSyncLabel() {
+    const el = $('syncLabel');
+    if (!el) return;
+    if (connStatus === 'live' && lastTickAt) {
+      const secs = Math.max(0, (Date.now() - lastTickAt) / 1000);
+      el.textContent = secs < 2 ? '● LIVE · synced just now' : `● LIVE · synced ${secs.toFixed(1)}s ago`;
+      el.className = 'sync-label live';
+    } else if (connStatus === 'polling') {
+      el.textContent = '◐ delayed · live-sync ~1 min';
+      el.className = 'sync-label delayed';
+    } else if (connStatus === 'simulator' || connStatus === 'offline') {
+      el.textContent = '○ offline · simulator';
+      el.className = 'sync-label offline';
+    } else {
+      el.textContent = '◌ connecting…';
+      el.className = 'sync-label';
+    }
+    const dot = $('tapeDot');
+    if (dot) dot.className = 'conn-dot ' + (connStatus === 'live' ? 'live' : connStatus === 'polling' ? 'polling' : connStatus === 'simulator' || connStatus === 'offline' ? 'offline' : 'connecting');
+  }
+
+  /** Render Zoqira-style scrolling ticker tape (duplicated for seamless loop). */
+  function renderTape(items) {
+    const el = $('tickerTape');
+    if (!el || !items || !items.length) return;
+    const html = items.map((it) => {
+      const up = it.changePct >= 0;
+      const sync = connStatus === 'live' ? 'live-sync' : connStatus === 'polling' ? 'delayed · live-sync ~1 min' : 'delayed';
+      return `<span class="tape-item"><b>${it.symbol}</b><span class="tp">${fmtPrice(it.price, it.decimals)}</span><span class="${up ? 'up' : 'down'}">${up ? '▲' : '▼'} ${fmt(Math.abs(it.changePct))}%</span><span class="sync">${sync}</span></span>`;
+    }).join('');
+    el.innerHTML = html + html; // duplicate for infinite marquee
+  }
+
+  async function refreshTape() {
+    if (!D.refreshTape) return;
+    const items = await D.refreshTape().catch(() => []);
+    if (items && items.length) renderTape(items);
+  }
+
+  /** Update only the XAUUSD tape item on each WS tick (feels truly realtime). */
+  function updateTapeXAU(price) {
+    const items = D.getTape && D.getTape();
+    if (!items || !items.length) return;
+    const xau = items.find((i) => i.symbol === 'XAUUSD');
+    if (xau) { xau.price = price; renderTape(items); }
   }
 
   function updateCountdown() {
@@ -208,13 +268,15 @@
     // Prefer real 24h change from Binance ticker; fall back to candle change
     const chg = ticker ? ticker.change : last.close - (candles[candles.length - 2] || last).close;
     const pct = ticker ? ticker.changePct : (chg / last.close) * 100;
-    $('livePrice').textContent = fmt(last.close);
+    $('livePrice').textContent = fmtPrice(last.close);
     flashPrice(last.close);
     const lc = $('liveChange');
-    lc.textContent = `${chg >= 0 ? '▲' : '▼'} ${fmt(Math.abs(chg))} (${fmt(Math.abs(pct))}%)`;
+    lc.textContent = `${chg >= 0 ? '▲' : '▼'} ${fmtPrice(Math.abs(chg))} (${fmt(Math.abs(pct))}%)`;
     lc.className = 'tick-change ' + (chg >= 0 ? 'up' : 'down');
-    $('ohlcInfo').textContent = `O ${fmt(last.open)}  H ${fmt(last.high)}  L ${fmt(last.low)}  C ${fmt(last.close)}`;
+    $('ohlcInfo').textContent = `O ${fmtPrice(last.open)}  H ${fmtPrice(last.high)}  L ${fmtPrice(last.low)}  C ${fmtPrice(last.close)}`;
     updateCountdown();
+    updateSyncLabel();
+    renderTicker(); // keep day-range marker moving with price
     if (res) renderSignal(res);
   }
 
@@ -228,7 +290,7 @@
   /** Realtime tick handler: chart every tick, scanner/signal throttled + on candle close. */
   function onRealtimeTick({ tf, candle, closed, isNew }) {
     lastTickAt = Date.now();
-    if (tf === currentTF) scheduleChartRender();
+    if (tf === currentTF) { scheduleChartRender(); updateTapeXAU(candle.close); }
     const now = Date.now();
     if (isNew || closed || now - lastScannerAt > 5000) {
       lastScannerAt = now;
@@ -300,7 +362,7 @@
     toast(`Backtest ${currentTF} · ${mode}: ${res.winRate}% win rate over ${res.total} trades`);
   }
 
-  function renderAll() { renderTFs(); renderChart(); renderScanner(); renderNews(); renderSessions(); renderJournal(); renderTicker(); }
+  function renderAll() { renderTFs(); renderChart(); renderScanner(); renderNews(); renderSessions(); renderJournal(); renderTicker(); if (D.getTape && D.getTape().length) renderTape(D.getTape()); }
 
   /* ---------- events ---------- */
   document.querySelectorAll('.mode-btn').forEach((b) => b.onclick = () => {
@@ -428,9 +490,11 @@
       toast('⚠ Real feed unavailable — simulator fallback (check internet)');
     }
     startStreaming();
-    setInterval(() => { $('clock').textContent = new Date().toLocaleTimeString(); updateCountdown(); }, 1000);
+    refreshTape(); // Zoqira-style tape: initial load
+    setInterval(() => { $('clock').textContent = new Date().toLocaleTimeString(); updateCountdown(); updateSyncLabel(); }, 1000);
     setInterval(renderSessions, 30000);
     setInterval(renderNews, 60000);
+    setInterval(refreshTape, 15000); // tape symbols (BTC/ETH/FX/Oil) refresh
     // Refresh 24h ticker stats every 30s in realtime mode
     setInterval(async () => {
       if (!RT || D.getMode() !== 'realtime') return;
