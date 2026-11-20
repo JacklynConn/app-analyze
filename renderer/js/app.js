@@ -9,6 +9,9 @@
   let lastSignal = null, lastSignalKey = '', soundOn = true, alertArmed = false;
   let journal = JSON.parse(localStorage.getItem('pulse_journal') || '[]');
   let audioCtx = null;
+  let connStatus = 'connecting', lastTickAt = 0, prevPrice = null;
+  let chartRafPending = false, lastScannerAt = 0, simTimers = [];
+  const RT = window.PulseRealtime;
 
   /* ---------- toast + sound + desktop notify ---------- */
   function toast(msg) {
@@ -63,6 +66,50 @@
       mk('Retail Sales m/m', 'USD', 'medium', 13, 0, 'ការលក់រាយ — វាស់កម្លាំងសេដ្ឋកិច្ចអាមេរិក'),
     ].sort((a, b) => a.when - b.when);
     return list;
+  }
+
+  /* ---------- realtime status / ticker ---------- */
+  function setConnStatus(status, detail) {
+    connStatus = status;
+    const dot = $('connDot');
+    if (dot) dot.className = 'conn-dot ' + status;
+    const labels = {
+      live: '● LIVE', polling: '◐ POLLING', reconnecting: '◌ RECONNECTING',
+      offline: '○ OFFLINE', connecting: '◌ CONNECTING', simulator: '○ SIMULATOR',
+    };
+    const src = D.getMode() === 'realtime' ? D.getSource() : 'Simulator (offline)';
+    if ($('feedSource')) $('feedSource').innerHTML = `<span id="connDot" class="conn-dot ${status}"></span> ${labels[status] || status} · ${src}${detail ? ' · ' + detail : ''}`;
+    if ($('chartSource')) $('chartSource').textContent = src + (status === 'live' ? ' · WebSocket' : status === 'polling' ? ' · REST poll' : '');
+  }
+
+  function renderTicker() {
+    const t = D.getTicker && D.getTicker();
+    if (!t) return;
+    $('tickerStats').textContent =
+      `Bid ${fmt(t.bid)} · Ask ${fmt(t.ask)} · Spread ${fmt(t.ask - t.bid)} · 24h H ${fmt(t.high)} / L ${fmt(t.low)} · 24h ${t.changePct >= 0 ? '+' : ''}${fmt(t.changePct)}%`;
+  }
+
+  function updateCountdown() {
+    const candles = store[currentTF];
+    if (!candles || !candles.length) return;
+    const last = candles[candles.length - 1];
+    const mins = D.TIMEFRAMES[currentTF].minutes;
+    const closeAt = last.time + mins * 60000;
+    const remain = Math.max(0, Math.round((closeAt - Date.now()) / 1000));
+    const mm = String(Math.floor(remain / 60)).padStart(2, '0'), ss = String(remain % 60).padStart(2, '0');
+    $('candleCountdown').textContent = `Candle ${currentTF}: ${mm}:${ss}`;
+    if (lastTickAt) $('lastTick').textContent = 'Last tick: ' + new Date(lastTickAt).toLocaleTimeString();
+  }
+
+  function flashPrice(price) {
+    const el = $('livePrice');
+    if (prevPrice != null && price !== prevPrice) {
+      el.classList.remove('flash-up', 'flash-down');
+      void el.offsetWidth; // restart transition
+      el.classList.add(price > prevPrice ? 'flash-up' : 'flash-down');
+      setTimeout(() => el.classList.remove('flash-up', 'flash-down'), 350);
+    }
+    prevPrice = price;
   }
 
   /* ---------- renderers ---------- */
@@ -146,25 +193,55 @@
 
   function renderChart() {
     const candles = store[currentTF];
-    if (!candles) return;
+    if (!candles || !candles.length) return;
     const res = E.analyze(candles, mode);
     const cl = candles.map((c) => c.close);
     C.drawChart($('chart'), candles, {
       count: 90,
+      live: D.getMode() === 'realtime' && connStatus === 'live',
       emaFast: E.emaSeries(cl, 9), emaSlow: E.emaSeries(cl, 21),
       bb: res ? res.indicators.bollinger : null,
       trade: res && res.signal !== 'WAIT' ? res.trade : null,
     });
     const last = candles[candles.length - 1];
-    const prev = candles[candles.length - 2] || last;
-    const chg = last.close - prev.close, pct = (chg / prev.close) * 100;
+    const ticker = D.getTicker && D.getTicker();
+    // Prefer real 24h change from Binance ticker; fall back to candle change
+    const chg = ticker ? ticker.change : last.close - (candles[candles.length - 2] || last).close;
+    const pct = ticker ? ticker.changePct : (chg / last.close) * 100;
     $('livePrice').textContent = fmt(last.close);
+    flashPrice(last.close);
     const lc = $('liveChange');
     lc.textContent = `${chg >= 0 ? '▲' : '▼'} ${fmt(Math.abs(chg))} (${fmt(Math.abs(pct))}%)`;
     lc.className = 'tick-change ' + (chg >= 0 ? 'up' : 'down');
     $('ohlcInfo').textContent = `O ${fmt(last.open)}  H ${fmt(last.high)}  L ${fmt(last.low)}  C ${fmt(last.close)}`;
-    $('feedSource').textContent = 'Feed: ' + D.getSource();
+    updateCountdown();
     if (res) renderSignal(res);
+  }
+
+  /** Throttled chart render for high-frequency WS ticks (max ~4 fps). */
+  function scheduleChartRender() {
+    if (chartRafPending) return;
+    chartRafPending = true;
+    requestAnimationFrame(() => { chartRafPending = false; renderChart(); });
+  }
+
+  /** Realtime tick handler: chart every tick, scanner/signal throttled + on candle close. */
+  function onRealtimeTick({ tf, candle, closed, isNew }) {
+    lastTickAt = Date.now();
+    if (tf === currentTF) scheduleChartRender();
+    const now = Date.now();
+    if (isNew || closed || now - lastScannerAt > 5000) {
+      lastScannerAt = now;
+      renderScanner();
+      if (tf === currentTF) renderChart();
+    }
+    updateCountdown();
+  }
+
+  function onRealtimeStatus(status, detail) {
+    setConnStatus(status, detail);
+    if (status === 'live') toast('🟢 Realtime connected — Binance PAXG WebSocket live!');
+    else if (status === 'polling') toast('🟡 WebSocket unavailable — polling REST every 5s (still realtime)');
   }
 
   function renderNews() {
@@ -223,7 +300,7 @@
     toast(`Backtest ${currentTF} · ${mode}: ${res.winRate}% win rate over ${res.total} trades`);
   }
 
-  function renderAll() { renderTFs(); renderChart(); renderScanner(); renderNews(); renderSessions(); renderJournal(); }
+  function renderAll() { renderTFs(); renderChart(); renderScanner(); renderNews(); renderSessions(); renderJournal(); renderTicker(); }
 
   /* ---------- events ---------- */
   document.querySelectorAll('.mode-btn').forEach((b) => b.onclick = () => {
@@ -233,7 +310,58 @@
   });
   $('scanAllBtn').onclick = () => { renderScanner(); toast('Scanned all 6 timeframes — see confluence summary below.'); };
   $('backtestBtn').onclick = renderBacktest;
-  $('refreshBtn').onclick = () => { renderAll(); toast('Refreshed'); };
+  $('refreshBtn').onclick = async () => {
+    toast('↻ Reconnecting realtime feed…');
+    if (RT) {
+      const t = await RT.fetchTicker24h().catch(() => null);
+      if (t) { D.setTicker(t); renderTicker(); }
+      const hist = await RT.fetchHistory(currentTF, 300).catch(() => null);
+      if (hist) { store[currentTF] = hist.candles; D.setSource(hist.source); }
+    }
+    startStreaming();
+    renderAll();
+  };
+  $('feedSelect').onchange = async (e) => {
+    const v = e.target.value;
+    D.stopRealtime && D.stopRealtime();
+    simTimers.forEach(clearInterval); simTimers = [];
+    if (v === 'simulator') {
+      D.setMode && D.setMode('simulator');
+      const anchor = store[currentTF] ? store[currentTF].slice(-1)[0].close : 2650;
+      for (const tf of Object.keys(D.TIMEFRAMES)) store[tf] = D.genCandles(D.TIMEFRAMES[tf].candles, D.TIMEFRAMES[tf].minutes, anchor);
+      D.setSource('Simulator (manual)');
+      setConnStatus('simulator');
+      startSimTicks();
+      toast('Simulator mode — offline demo data');
+    } else if (v === 'yahoo') {
+      toast('Fetching Yahoo GC=F history…');
+      const hist = await RT.fetchHistory(currentTF, 300).catch(() => null);
+      if (hist) { store[currentTF] = hist.candles; D.setSource(hist.source); }
+      setConnStatus('polling', 'Yahoo GC=F');
+      // Poll Yahoo every 10s for current TF
+      simTimers.push(setInterval(async () => {
+        const h = await RT.fetchHistory(currentTF, 2).catch(() => null);
+        if (h && h.candles.length) {
+          const tick = h.candles[h.candles.length - 1];
+          RT.applyTick(store[currentTF], tick);
+          lastTickAt = Date.now(); scheduleChartRender();
+        }
+      }, 10000));
+      renderAll();
+    } else {
+      // auto / binance -> full realtime (re-fetch all TFs then stream)
+      toast('Fetching realtime history for all timeframes…');
+      const jobs = Object.keys(D.TIMEFRAMES).map(async (tf) => {
+        const h = await RT.fetchHistory(tf, 300).catch(() => null);
+        if (h) store[tf] = h.candles;
+      });
+      await Promise.all(jobs);
+      D.setMode && D.setMode('realtime');
+      D.setSource('Binance PAXG Live');
+      startStreaming();
+      renderAll();
+    }
+  };
   $('soundBtn').onclick = () => { soundOn = !soundOn; $('soundBtn').textContent = soundOn ? '🔔 Sound: ON' : '🔕 Sound: OFF'; };
   $('balanceInput').oninput = () => updateLot();
   $('riskInput').oninput = () => updateLot();
@@ -263,22 +391,51 @@
   };
   window.addEventListener('resize', () => renderChart());
 
-  /* ---------- boot + live loop ---------- */
-  (async function boot() {
-    toast('XAUUSD PULSE PRO — connecting to live feed…');
-    store = await D.init();
-    renderAll();
-    toast('Ready! Feed: ' + D.getSource());
-    setInterval(() => { $('clock').textContent = new Date().toLocaleTimeString(); }, 1000);
-    // live tick every 2s on current TF + background tick others every 6s
-    setInterval(() => {
+  /* ---------- streaming lifecycle ---------- */
+  function startSimTicks() {
+    simTimers.push(setInterval(() => {
       D.tickCandle(store[currentTF], D.TIMEFRAMES[currentTF].minutes);
       renderChart();
-    }, 2000);
-    setInterval(() => {
+    }, 2000));
+    simTimers.push(setInterval(() => {
       Object.keys(store).forEach((tf) => { if (tf !== currentTF) D.tickCandle(store[tf], D.TIMEFRAMES[tf].minutes); });
       renderScanner(); renderSessions();
-    }, 6000);
+    }, 6000));
+  }
+
+  function startStreaming() {
+    D.stopRealtime && D.stopRealtime();
+    simTimers.forEach(clearInterval); simTimers = [];
+    if (D.getMode() === 'realtime') {
+      const handle = D.startRealtime(store, { onTick: onRealtimeTick, onStatus: onRealtimeStatus });
+      if (!handle) startSimTicks();
+    } else {
+      setConnStatus('simulator');
+      startSimTicks();
+    }
+  }
+
+  /* ---------- boot + live loop ---------- */
+  (async function boot() {
+    toast('XAUUSD PULSE PRO — connecting to realtime feed…');
+    setConnStatus('connecting');
+    store = await D.init();
+    renderAll();
+    if (D.getMode() === 'realtime') {
+      toast('🟢 Real market data loaded — starting WebSocket stream…');
+      setConnStatus('connecting', D.getSource());
+    } else {
+      toast('⚠ Real feed unavailable — simulator fallback (check internet)');
+    }
+    startStreaming();
+    setInterval(() => { $('clock').textContent = new Date().toLocaleTimeString(); updateCountdown(); }, 1000);
+    setInterval(renderSessions, 30000);
     setInterval(renderNews, 60000);
+    // Refresh 24h ticker stats every 30s in realtime mode
+    setInterval(async () => {
+      if (!RT || D.getMode() !== 'realtime') return;
+      const t = await RT.fetchTicker24h().catch(() => null);
+      if (t) { D.setTicker(t); renderTicker(); renderChart(); }
+    }, 30000);
   })();
 })();
