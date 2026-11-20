@@ -1,0 +1,32 @@
+{
+  "name": "xauusd-pulse-pro",
+  "version": "2.0.0",
+  "description": "XAUUSD PULSE PRO — Desktop Signal Scanner for Gold. Multi-timeframe confluence engine, live chart, auto BUY/SELL signals with Entry/SL/TP, backtest, journal & risk calculator. Free forever, no KEY, no login.",
+  "main": "electron/main.js",
+  "author": "XAUUSD PULSE PRO",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "web": "npx --yes serve renderer -l 5173",
+    "build": "electron-builder",
+    "build:win": "electron-builder --win",
+    "build:mac": "electron-builder --mac",
+    "build:linux": "electron-builder --linux",
+    "test": "node --test tests/engine.test.js"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.xauusd.pulsepro",
+    "productName": "XAUUSD PULSE PRO",
+    "directories": { "output": "dist" },
+    "files": ["electron/**/*", "renderer/**/*", "package.json"],
+    "win": { "target": [{ "target": "nsis", "arch": ["x64"] }], "icon": "build/icon.ico" },
+    "mac": { "target": [{ "target": "dmg", "arch": ["arm64", "x64"] }], "icon": "build/icon.icns", "category": "public.app-category.finance" },
+    "linux": { "target": [{ "target": "AppImage", "arch": ["x64"] }], "icon": "build/icon.png", "category": "Finance" },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "createDesktopShortcut": true, "createStartMenuShortcut": true }
+  }
+}

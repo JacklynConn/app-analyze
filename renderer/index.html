@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="km">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https:; media-src 'self' data:; font-src 'self' data:;" />
+<title>XAUUSD PULSE PRO — Gold Signal Scanner</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div id="app">
+  <!-- ===== Top bar ===== -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">Au</div>
+      <div>
+        <div class="brand-name">XAUUSD <span>PULSE PRO</span></div>
+        <div class="brand-sub">Gold Signal Scanner · Desktop v2.0 · FREE forever — no KEY, no login</div>
+      </div>
+    </div>
+    <div class="ticker">
+      <div class="tick-main">
+        <span class="tick-symbol">XAUUSD</span>
+        <span id="livePrice" class="tick-price">—</span>
+        <span id="liveChange" class="tick-change">—</span>
+      </div>
+      <div class="tick-meta">
+        <span id="feedSource" class="pill">Connecting…</span>
+        <span id="clock" class="pill">—</span>
+        <span id="sessionPill" class="pill">—</span>
+      </div>
+    </div>
+    <div class="top-actions">
+      <button id="soundBtn" class="btn ghost" title="បើក/បិទសំឡេងជូនដំណឹង">🔔 Sound: ON</button>
+      <button id="refreshBtn" class="btn ghost">↻ Refresh</button>
+      <button id="exportBtn" class="btn gold">Export Journal</button>
+    </div>
+  </header>
+
+  <!-- ===== Main layout ===== -->
+  <div class="layout">
+    <!-- Left: chart + scanner -->
+    <main class="center">
+      <section class="card chart-card">
+        <div class="card-head">
+          <div class="tf-tabs" id="tfTabs"></div>
+          <div class="chart-legend">
+            <span class="lg"><i style="background:#f5c542"></i>EMA9</span>
+            <span class="lg"><i style="background:#4da3ff"></i>EMA21</span>
+            <span class="lg"><i style="background:#a855f7"></i>Bollinger</span>
+            <span id="ohlcInfo" class="ohlc">—</span>
+          </div>
+        </div>
+        <canvas id="chart"></canvas>
+        <div class="chart-foot">
+          <div class="mode-toggle">
+            <button data-mode="scalping" class="mode-btn active">⚡ Scalping <small>M1–M15</small></button>
+            <button data-mode="swing" class="mode-btn">📈 Swing <small>H1–D1</small></button>
+          </div>
+          <div id="indicatorStrip" class="indicator-strip"></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>🔍 Multi-Timeframe Scanner <small>ស្កេនគ្រប់ TF ព្រមគ្នា</small></h2>
+          <button id="scanAllBtn" class="btn gold small">Scan All TFs</button>
+        </div>
+        <table class="scanner-table">
+          <thead><tr><th>Timeframe</th><th>Price</th><th>Signal</th><th>Score</th><th>Confidence</th><th>Entry</th><th>SL</th><th>TP2</th><th>R:R</th></tr></thead>
+          <tbody id="scannerBody"><tr><td colspan="9" class="muted">កំពុងស្កេន…</td></tr></tbody>
+        </table>
+        <div id="confluenceBar" class="confluence"></div>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>📊 Backtest Engine <small>សាកល្បងយុទ្ធសាស្ត្រលើប្រវត្តិតម្លៃ</small></h2>
+          <button id="backtestBtn" class="btn ghost small">Run Backtest</button></div>
+        <div id="backtestResult" class="backtest"><p class="muted">ចុច Run Backtest ដើម្បីមើល Win Rate / Profit Factor លើ 220 candles ចុងក្រោយ។</p></div>
+      </section>
+    </main>
+
+    <!-- Right: signal panel -->
+    <aside class="right">
+      <section class="card signal-card" id="signalCard">
+        <div class="signal-head">
+          <div>
+            <div class="signal-label">LIVE SIGNAL · XAUUSD</div>
+            <div id="signalBig" class="signal-big wait">WAIT</div>
+          </div>
+          <div class="gauge">
+            <svg viewBox="0 0 100 100" width="92" height="92">
+              <circle cx="50" cy="50" r="42" fill="none" stroke="#1c2230" stroke-width="9"/>
+              <circle id="gaugeArc" cx="50" cy="50" r="42" fill="none" stroke="#f5c542" stroke-width="9" stroke-linecap="round" stroke-dasharray="264" stroke-dashoffset="264" transform="rotate(-90 50 50)"/>
+              <text id="gaugeText" x="50" y="55" text-anchor="middle" fill="#fff" font-size="20" font-weight="800">0%</text>
+            </svg>
+            <div class="gauge-sub">Confidence</div>
+          </div>
+        </div>
+
+        <div class="trade-grid">
+          <div class="trade-box entry"><label>ENTRY</label><strong id="tEntry">—</strong></div>
+          <div class="trade-box sl"><label>STOP LOSS</label><strong id="tSL">—</strong></div>
+          <div class="trade-box tp"><label>TAKE PROFIT 1</label><strong id="tTP1">—</strong></div>
+          <div class="trade-box tp"><label>TAKE PROFIT 2</label><strong id="tTP2">—</strong></div>
+          <div class="trade-box tp"><label>TAKE PROFIT 3</label><strong id="tTP3">—</strong></div>
+          <div class="trade-box rr"><label>R : R</label><strong id="tRR">—</strong></div>
+        </div>
+
+        <div class="risk-row">
+          <label>Balance $ <input id="balanceInput" type="number" value="1000" min="10" /></label>
+          <label>Risk % <input id="riskInput" type="number" value="1" min="0.1" max="10" step="0.1" /></label>
+          <div class="lot-box">Lot: <strong id="lotOut">—</strong><small id="lotRisk">—</small></div>
+        </div>
+
+        <div class="signal-actions">
+          <button id="copySignalBtn" class="btn gold">📋 Copy Signal</button>
+          <button id="saveSignalBtn" class="btn ghost">💾 Save to Journal</button>
+          <button id="alertBtn" class="btn ghost">⏰ Alert me</button>
+        </div>
+
+        <h3 class="sub-h">ហេតុផលវិភាគ · Why this signal?</h3>
+        <ul id="reasonsList" class="reasons"><li class="muted">កំពុងវិភាគ 9 indicators…</li></ul>
+
+        <h3 class="sub-h">Indicator Votes</h3>
+        <div id="votesList" class="votes"></div>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>📰 High-Impact News</h2><span class="pill warn" id="newsWarn">⚠ Avoid trading 5 min before/after</span></div>
+        <div id="newsList" class="news-list"></div>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>🕐 Market Sessions</h2></div>
+        <div id="sessions" class="sessions"></div>
+      </section>
+    </aside>
+  </div>
+
+  <!-- Bottom: journal -->
+  <section class="card journal-card">
+    <div class="card-head">
+      <h2>📓 Trade Journal <small>ប្រវត្តិ Signal ដែលបានរក្សាទុក</small></h2>
+      <div>
+        <span id="journalStats" class="pill">0 signals</span>
+        <button id="clearJournalBtn" class="btn ghost small">Clear</button>
+      </div>
+    </div>
+    <table class="scanner-table">
+      <thead><tr><th>Time</th><th>TF</th><th>Signal</th><th>Entry</th><th>SL</th><th>TP2</th><th>Conf.</th><th>Result</th><th>Action</th></tr></thead>
+      <tbody id="journalBody"><tr><td colspan="9" class="muted">នៅមិនទាន់មាន signal ដែលបាន save — ចុច Save to Journal នៅពេលមាន signal ច្បាស់។</td></tr></tbody>
+    </table>
+  </section>
+
+  <footer class="footer">
+    XAUUSD PULSE PRO គឺជាឧបករណ៍ជំនួយការវិភាគ មិនមែនជាដំបូន្មានហិរញ្ញវត្ថុ ឬការធានាប្រាក់ចំណេញទេ។ ការជួញដូរ Forex / មាសមានហានិភ័យខ្ពស់ — គ្រប់គ្រងហានិភ័យ ≤ 1–2% ក្នុងមួយ Trade ជានិច្ច។ អ្នកទទួលខុសត្រូវទាំងស្រុងលើការសម្រេចចិត្តរបស់អ្នក។
+  </footer>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="js/engine.js"></script>
+<script src="js/data.js"></script>
+<script src="js/chart.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
