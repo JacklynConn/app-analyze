@@ -26,6 +26,7 @@
   let liveSource = 'Simulator';
   let mode = 'simulator'; // 'realtime' | 'simulator'
   let ticker24h = null;
+  let tapeTickers = [];
   let realtimeHandle = null;
 
   function seededRandom(seed) { let s = seed; return () => { s = (s * 9301 + 49297) % 233280; return s / 233280; }; }
@@ -186,9 +187,18 @@
   function getBasePrice() { return basePrice; }
   function getTicker() { return ticker24h; }
   function setTicker(t) { ticker24h = t; }
+  function getTape() { return tapeTickers; }
+  function setTape(items) { tapeTickers = items || []; }
+  async function refreshTape() {
+    const RT = global.PulseRealtime;
+    if (!RT) return tapeTickers;
+    const items = await RT.fetchTapeTickers().catch(() => []);
+    if (items && items.length) tapeTickers = items;
+    return tapeTickers;
+  }
   function setSource(s) { liveSource = s; }
 
-  const api = { TIMEFRAMES, init, tickCandle, tryLivePrice, startRealtime, stopRealtime, getSource, getMode, setMode, getBasePrice, getTicker, setTicker, setSource, genCandles };
+  const api = { TIMEFRAMES, init, tickCandle, tryLivePrice, startRealtime, stopRealtime, getSource, getMode, setMode, getBasePrice, getTicker, setTicker, getTape, setTape, refreshTape, genCandles };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   global.PulseData = api;
 })(typeof window !== 'undefined' ? window : globalThis);

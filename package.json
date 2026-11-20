@@ -1,6 +1,6 @@
 {
   "name": "xauusd-pulse-pro",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "XAUUSD PULSE PRO — Desktop Signal Scanner for Gold with REALTIME price chart (Binance PAXG WebSocket + Yahoo GC=F). Multi-timeframe confluence engine, live chart, auto BUY/SELL signals with Entry/SL/TP, backtest, journal & risk calculator. Free forever, no KEY, no login.",
   "main": "electron/main.js",
   "author": "XAUUSD PULSE PRO",

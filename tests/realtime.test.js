@@ -77,3 +77,35 @@ test('combinedStreamUrl includes all 6 kline streams', () => {
   assert.ok(url.includes('paxgusdt@kline_1d'));
   assert.strictEqual((url.match(/kline_/g) || []).length, 6);
 });
+
+test('parseYahooMeta extracts price/change/high/low (Zoqira tape)', () => {
+  const json = { chart: { result: [{ meta: { regularMarketPrice: 1.0966, regularMarketChangePercent: -0.0658, regularMarketDayHigh: 1.0993, regularMarketDayLow: 1.0961 } }] } };
+  const m = RT.parseYahooMeta(json);
+  assert.strictEqual(m.price, 1.0966);
+  assert.ok(Math.abs(m.changePct - (-0.0658)) < 1e-9);
+  assert.strictEqual(m.high, 1.0993);
+  assert.strictEqual(RT.parseYahooMeta(null), null);
+  assert.strictEqual(RT.parseYahooMeta({ chart: { result: [] } }), null);
+});
+
+test('parseBinanceTicker extracts tape fields', () => {
+  const j = { lastPrice: '61830.23', priceChangePercent: '-3.137', highPrice: '64080.80', lowPrice: '61290.58', bidPrice: '61830.22', askPrice: '61830.23' };
+  const t = RT.parseBinanceTicker(j);
+  assert.strictEqual(t.price, 61830.23);
+  assert.strictEqual(t.changePct, -3.137);
+  assert.strictEqual(RT.parseBinanceTicker(null), null);
+});
+
+test('formatPrice uses thousand separators (Zoqira style)', () => {
+  assert.strictEqual(RT.formatPrice(3590.95, 2), '3,590.95');
+  assert.strictEqual(RT.formatPrice(61809, 0), '61,809');
+  assert.strictEqual(RT.formatPrice(1.0966, 4), '1.0966');
+  assert.strictEqual(RT.formatPrice(null), '—');
+});
+
+test('TAPE_SYMBOLS covers Zoqira tape order with XAUUSD first', () => {
+  assert.strictEqual(RT.TAPE_SYMBOLS[0].display, 'XAUUSD');
+  const displays = RT.TAPE_SYMBOLS.map((s) => s.display);
+  for (const s of ['BTCUSDT', 'ETHUSDT', 'EURUSD', 'GBPUSD', 'USOIL']) assert.ok(displays.includes(s), s);
+  RT.TAPE_SYMBOLS.forEach((s) => assert.ok(s.binance || s.yahoo, s.display + ' needs a source'));
+});
